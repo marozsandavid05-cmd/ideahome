@@ -1,0 +1,8 @@
+# OS / OneDrive
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+
+# Build segéd (nem kell a deployhoz)
+src/
