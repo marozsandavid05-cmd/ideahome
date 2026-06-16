@@ -35,6 +35,26 @@
     });
   }
 
+  /* ---------- SERVICES DROPDOWN (touch / keyboard; CSS handles hover) ---------- */
+  $$(".nav-dd").forEach(function (dd) {
+    var trigger = dd.querySelector(".nav-dd-trigger");
+    if (!trigger) return;
+    function setOpen(state) {
+      dd.classList.toggle("open", state);
+      trigger.setAttribute("aria-expanded", String(state));
+    }
+    trigger.addEventListener("click", function (e) {
+      e.preventDefault();
+      setOpen(!dd.classList.contains("open"));
+    });
+    document.addEventListener("click", function (e) {
+      if (!dd.contains(e.target)) setOpen(false);
+    });
+    dd.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { setOpen(false); trigger.focus(); }
+    });
+  });
+
   /* ---------- REVEALS ---------- */
   var targets = $$(".reveal, .mask-head, .img-reveal, .pcard, .gallery-item");
   if (reduce || !("IntersectionObserver" in window)) {
@@ -70,7 +90,7 @@
       el.addEventListener("mouseenter", function () { document.body.classList.add("cursor-hover"); });
       el.addEventListener("mouseleave", function () { document.body.classList.remove("cursor-hover"); });
     });
-    $$("[data-view], .work, .pcard, .gallery-item, .hero-frame, .next-project").forEach(function (el) {
+    $$("[data-view], .work, .pcard, .gallery-item, .next-project").forEach(function (el) {
       el.addEventListener("mouseenter", function () { document.body.classList.add("cursor-view"); label.textContent = el.getAttribute("data-view") || "Megnézem"; });
       el.addEventListener("mouseleave", function () { document.body.classList.remove("cursor-view"); });
     });
@@ -154,4 +174,95 @@
 
   /* ---------- ÉV ---------- */
   $$("[data-year]").forEach(function (el) { el.textContent = new Date().getFullYear(); });
+
+  /* ---------- PRÉMIUM MOZGÁS (progressive enhancement: GSAP scrub + Three.js textúra) ----------
+     NINCS scroll-hijack (Lenis kivéve, mert a body overflow-x:hidden-nel megfojtotta a görgetést).
+     Robosztus: reduced-motion alatt kimarad; CDN-hiba esetén minden marad (natív scroll,
+     CSS/IO reveal, pine heró-háttér). A görgetés és a tartalom SOHA nem függ ezektől. */
+  (function () {
+    if (reduce) return;
+    function load(src) {
+      return new Promise(function (res, rej) {
+        var s = document.createElement("script");
+        s.src = src; s.async = true; s.onload = res; s.onerror = rej;
+        document.head.appendChild(s);
+      });
+    }
+
+    // GSAP + ScrollTrigger — NATÍV scrollon (nincs scroll-hijack), CSAK dekoratív scrub.
+    // A görgetés sosem függ ettől; reveal marad IO-n.
+    Promise.all([
+      load("https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"),
+      load("https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js")
+    ]).then(function () {
+      if (!window.gsap || !window.ScrollTrigger) return;
+      gsap.registerPlugin(ScrollTrigger);
+      // signature: heró ív-keret mélység-parallax
+      $$(".hero-frame.arch").forEach(function (frame) {
+        var hero = frame.closest(".hero");
+        if (!hero) return;
+        gsap.to(frame, { yPercent: 7, ease: "none",
+          scrollTrigger: { trigger: hero, start: "top top", end: "bottom top", scrub: true } });
+      });
+      // finom mélység a galéria-képeken (a belső img reveal-scale-jét nem érinti, a keretet mozgatja)
+      $$(".work .ph, .pcard .ph").forEach(function (ph) {
+        gsap.fromTo(ph, { yPercent: -3 }, { yPercent: 3, ease: "none",
+          scrollTrigger: { trigger: ph, start: "top bottom", end: "bottom top", scrub: true } });
+      });
+    }).catch(function () {});
+
+    // 3) Three.js finom heró-textúra (dekoratív; a pine háttér a fallback)
+    var heroDark = $(".hero-dark");
+    if (heroDark && window.innerWidth > 720) {
+      load("https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js").then(function () {
+        if (!window.THREE) return;
+        try { initHeroTexture(heroDark); } catch (e) {}
+      }).catch(function () {});
+    }
+
+    function initHeroTexture(host) {
+      var THREE = window.THREE;
+      var canvas = document.createElement("canvas");
+      canvas.className = "hero-fx";
+      host.insertBefore(canvas, host.firstChild);
+      var renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: false });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      var scene = new THREE.Scene();
+      var camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      var uniforms = { u_time: { value: 0 }, u_res: { value: new THREE.Vector2(1, 1) } };
+      var mat = new THREE.ShaderMaterial({
+        uniforms: uniforms, transparent: true,
+        vertexShader: "void main(){ gl_Position = vec4(position,1.0); }",
+        fragmentShader: [
+          "precision highp float;",
+          "uniform float u_time; uniform vec2 u_res;",
+          "float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }",
+          "float noise(vec2 p){ vec2 i=floor(p); vec2 f=fract(p); vec2 u=f*f*(3.0-2.0*f);",
+          " return mix(mix(hash(i),hash(i+vec2(1.0,0.0)),u.x),mix(hash(i+vec2(0.0,1.0)),hash(i+vec2(1.0,1.0)),u.x),u.y); }",
+          "void main(){ vec2 uv=gl_FragCoord.xy/u_res.xy; float t=u_time*0.025;",
+          " float n=noise(uv*3.0+vec2(t,t*0.6))*0.6+noise(uv*6.0-vec2(t*0.4,t))*0.4;",
+          " float g=hash(gl_FragCoord.xy+vec2(u_time))*0.05;",
+          " float glow=smoothstep(0.95,0.15,distance(uv,vec2(0.72,0.4)));",
+          " vec3 col=vec3(0.13,0.21,0.17)*n + vec3(0.20,0.30,0.24)*glow*0.5;",
+          " float a=(n*0.18+glow*0.10+g);",
+          " gl_FragColor=vec4(col, a*0.55); }"
+        ].join("\n")
+      });
+      scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+      function resize() {
+        var w = host.clientWidth, h = host.clientHeight;
+        renderer.setSize(w, h, false);
+        uniforms.u_res.value.set(w * renderer.getPixelRatio(), h * renderer.getPixelRatio());
+      }
+      resize();
+      window.addEventListener("resize", resize, { passive: true });
+      var start = performance.now(), shown = false;
+      (function anim() {
+        uniforms.u_time.value = (performance.now() - start) / 1000;
+        renderer.render(scene, camera);
+        if (!shown) { shown = true; canvas.classList.add("on"); }
+        requestAnimationFrame(anim);
+      })();
+    }
+  })();
 })();
